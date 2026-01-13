@@ -3,5 +3,3 @@ numpy
 matplotlib
 scipy
 pandas
-io
-base64
