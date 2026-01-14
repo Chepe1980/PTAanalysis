@@ -237,17 +237,22 @@ class AustinChalkPressureTransient:
         return fine_time, fine_delta_p, fine_derivative
 
 # ============================================================================
-# 2. PLOTLY PLOTTING FUNCTIONS
+# 2. PLOTLY PLOTTING FUNCTIONS (FIXED FOR PANDAS SERIES)
 # ============================================================================
 
 def create_diagnostic_log_log_plot_plotly(well_name, time, delta_p, derivative, fig_num, data_source="Synthetic"):
     """Create interactive log-log diagnostic plot using Plotly"""
+    # Convert to numpy arrays to avoid pandas indexing issues
+    time_np = np.array(time) if not isinstance(time, np.ndarray) else time
+    delta_p_np = np.array(delta_p) if not isinstance(delta_p, np.ndarray) else delta_p
+    derivative_np = np.array(derivative) if not isinstance(derivative, np.ndarray) else derivative
+    
     fig = go.Figure()
     
     # Add pressure change trace
     fig.add_trace(go.Scatter(
-        x=time,
-        y=delta_p,
+        x=time_np,
+        y=delta_p_np,
         mode='lines+markers',
         name=f'{data_source} ΔP (psi)',
         line=dict(color='blue', width=2),
@@ -257,8 +262,8 @@ def create_diagnostic_log_log_plot_plotly(well_name, time, delta_p, derivative, 
     
     # Add derivative trace
     fig.add_trace(go.Scatter(
-        x=time,
-        y=derivative,
+        x=time_np,
+        y=derivative_np,
         mode='lines+markers',
         name=f'{data_source} Derivative (psi)',
         line=dict(color='red', width=2),
@@ -268,7 +273,7 @@ def create_diagnostic_log_log_plot_plotly(well_name, time, delta_p, derivative, 
     
     # Add reference lines for different flow regimes
     # Unit slope for wellbore storage
-    unit_slope_x = np.array([time[0], time[-1]])
+    unit_slope_x = np.array([time_np[0], time_np[-1]])
     unit_slope_y = 10 * (unit_slope_x / unit_slope_x[0])
     fig.add_trace(go.Scatter(
         x=unit_slope_x,
@@ -292,16 +297,18 @@ def create_diagnostic_log_log_plot_plotly(well_name, time, delta_p, derivative, 
     ))
     
     # Constant derivative for radial flow
-    radial_level = np.mean(derivative[(time > 0.01) & (time < 0.1)])
-    if radial_level > 0:
-        fig.add_trace(go.Scatter(
-            x=[time[0], time[-1]],
-            y=[radial_level, radial_level],
-            mode='lines',
-            name=f'Radial Flow Level ({radial_level:.1f} psi)',
-            line=dict(color='magenta', dash='dash', width=1),
-            opacity=0.5
-        ))
+    mask_radial = (time_np > 0.01) & (time_np < 0.1)
+    if np.sum(mask_radial) > 0:
+        radial_level = np.mean(derivative_np[mask_radial])
+        if radial_level > 0:
+            fig.add_trace(go.Scatter(
+                x=[time_np[0], time_np[-1]],
+                y=[radial_level, radial_level],
+                mode='lines',
+                name=f'Radial Flow Level ({radial_level:.1f} psi)',
+                line=dict(color='magenta', dash='dash', width=1),
+                opacity=0.5
+            ))
     
     # Update layout
     fig.update_layout(
@@ -366,32 +373,39 @@ def create_diagnostic_log_log_plot_plotly(well_name, time, delta_p, derivative, 
         )
         
         # Mark dual porosity transition if visible
-        if np.min(derivative) < 0.5 * np.max(derivative[(time > 0.1) & (time < 10)]):
-            fig.add_annotation(
-                x=5,
-                y=np.min(derivative)*0.8,
-                text="Dual Porosity<br>Transition",
-                showarrow=False,
-                font=dict(size=10, color='black'),
-                bgcolor='rgba(255, 165, 0, 0.3)',
-                bordercolor='black',
-                borderwidth=1,
-                borderpad=4
-            )
+        mask_transition = (time_np > 0.1) & (time_np < 10)
+        if np.sum(mask_transition) > 0:
+            max_deriv_in_range = np.max(derivative_np[mask_transition])
+            if np.min(derivative_np) < 0.5 * max_deriv_in_range:
+                fig.add_annotation(
+                    x=5,
+                    y=np.min(derivative_np)*0.8,
+                    text="Dual Porosity<br>Transition",
+                    showarrow=False,
+                    font=dict(size=10, color='black'),
+                    bgcolor='rgba(255, 165, 0, 0.3)',
+                    bordercolor='black',
+                    borderwidth=1,
+                    borderpad=4
+                )
     
     return fig
 
 def create_sqrt_time_plot_plotly(well_name, time, delta_p, fig_num, data_source="Synthetic"):
     """Create interactive square root of time plot using Plotly"""
+    # Convert to numpy arrays
+    time_np = np.array(time) if not isinstance(time, np.ndarray) else time
+    delta_p_np = np.array(delta_p) if not isinstance(delta_p, np.ndarray) else delta_p
+    
     fig = go.Figure()
     
     # Calculate sqrt(time)
-    sqrt_time = np.sqrt(time)
+    sqrt_time = np.sqrt(time_np)
     
     # Plot pressure vs sqrt(time)
     fig.add_trace(go.Scatter(
         x=sqrt_time,
-        y=delta_p,
+        y=delta_p_np,
         mode='lines+markers',
         name=f'{data_source} Data',
         line=dict(color='blue', width=2),
@@ -401,9 +415,9 @@ def create_sqrt_time_plot_plotly(well_name, time, delta_p, fig_num, data_source=
     
     # Identify linear flow segments
     # Early linear flow (pre-transition)
-    mask_early = (time > 0.1) & (time < 1.0)
+    mask_early = (time_np > 0.1) & (time_np < 1.0)
     if np.sum(mask_early) > 5:
-        coeff_early = np.polyfit(sqrt_time[mask_early], delta_p[mask_early], 1)
+        coeff_early = np.polyfit(sqrt_time[mask_early], delta_p_np[mask_early], 1)
         line_early = np.polyval(coeff_early, sqrt_time[mask_early])
         m1 = coeff_early[0]
         
@@ -419,7 +433,7 @@ def create_sqrt_time_plot_plotly(well_name, time, delta_p, fig_num, data_source=
         # Add annotation for m1
         fig.add_annotation(
             x=np.mean(sqrt_time[mask_early]),
-            y=np.mean(delta_p[mask_early]),
+            y=np.mean(delta_p_np[mask_early]),
             text=f'm₁ = {m1:.1f}',
             showarrow=True,
             arrowhead=2,
@@ -433,9 +447,9 @@ def create_sqrt_time_plot_plotly(well_name, time, delta_p, fig_num, data_source=
         )
     
     # Late linear flow (post-transition)
-    mask_late = (time > 10) & (time < 100)
+    mask_late = (time_np > 10) & (time_np < 100)
     if np.sum(mask_late) > 5:
-        coeff_late = np.polyfit(sqrt_time[mask_late], delta_p[mask_late], 1)
+        coeff_late = np.polyfit(sqrt_time[mask_late], delta_p_np[mask_late], 1)
         line_late = np.polyval(coeff_late, sqrt_time[mask_late])
         m2 = coeff_late[0]
         
@@ -451,7 +465,7 @@ def create_sqrt_time_plot_plotly(well_name, time, delta_p, fig_num, data_source=
         # Add annotation for m2
         fig.add_annotation(
             x=np.mean(sqrt_time[mask_late]),
-            y=np.mean(delta_p[mask_late]),
+            y=np.mean(delta_p_np[mask_late]),
             text=f'm₂ = {m2:.1f}',
             showarrow=True,
             arrowhead=2,
@@ -518,15 +532,19 @@ def create_sqrt_time_plot_plotly(well_name, time, delta_p, fig_num, data_source=
 
 def create_larsen_plot_plotly(well_name, time, derivative, fig_num, data_source="Synthetic"):
     """Create interactive Larsen plot using Plotly"""
+    # Convert to numpy arrays
+    time_np = np.array(time) if not isinstance(time, np.ndarray) else time
+    derivative_np = np.array(derivative) if not isinstance(derivative, np.ndarray) else derivative
+    
     fig = go.Figure()
     
     # Calculate sqrt(time)
-    sqrt_time = np.sqrt(time)
+    sqrt_time = np.sqrt(time_np)
     
     # Filter out very early times
-    mask = time > 0.001
+    mask = time_np > 0.001
     sqrt_time_filt = sqrt_time[mask]
-    deriv_filt = derivative[mask]
+    deriv_filt = derivative_np[mask]
     
     # Plot derivative vs sqrt(time)
     fig.add_trace(go.Scatter(
@@ -540,10 +558,10 @@ def create_larsen_plot_plotly(well_name, time, derivative, fig_num, data_source=
     ))
     
     # Identify linear flow region
-    mask_linear = (time > 0.1) & (time < 10)
+    mask_linear = (time_np > 0.1) & (time_np < 10)
     if np.sum(mask_linear) > 5:
         sqrt_linear = sqrt_time[mask_linear]
-        deriv_linear = derivative[mask_linear]
+        deriv_linear = derivative_np[mask_linear]
         
         # Fit line through origin
         slope = np.sum(sqrt_linear * deriv_linear) / np.sum(sqrt_linear**2)
@@ -574,11 +592,11 @@ def create_larsen_plot_plotly(well_name, time, derivative, fig_num, data_source=
             ))
             
             # Mark radial flow region
-            mask_radial = time < 0.1
+            mask_radial = time_np < 0.1
             if np.sum(mask_radial) > 3:
                 fig.add_trace(go.Scatter(
                     x=sqrt_time[mask_radial],
-                    y=derivative[mask_radial],
+                    y=derivative_np[mask_radial],
                     mode='markers',
                     name='Radial Flow Region',
                     marker=dict(size=8, color='magenta', symbol='square'),
@@ -667,6 +685,11 @@ def create_larsen_plot_plotly(well_name, time, derivative, fig_num, data_source=
 
 def create_type_curve_match_plotly(well_name, time, delta_p, derivative, fig_num, data_source="Synthetic"):
     """Create interactive type-curve match plot using Plotly"""
+    # Convert to numpy arrays
+    time_np = np.array(time) if not isinstance(time, np.ndarray) else time
+    delta_p_np = np.array(delta_p) if not isinstance(delta_p, np.ndarray) else delta_p
+    derivative_np = np.array(derivative) if not isinstance(derivative, np.ndarray) else derivative
+    
     fig = make_subplots(
         rows=2, cols=1,
         subplot_titles=('Dimensionless Pressure', 'Dimensionless Derivative'),
@@ -728,8 +751,9 @@ def create_type_curve_match_plotly(well_name, time, delta_p, derivative, fig_num
     scale_time = 10.0
     scale_pressure = 100.0
     
-    tD_field = time * scale_time
-    pD_field = delta_p / scale_pressure
+    tD_field = time_np * scale_time
+    pD_field = delta_p_np / scale_pressure
+    # Use numpy gradient with log of time for better derivative calculation
     derivD_field = np.gradient(pD_field, np.log(tD_field))
     
     # Add data to subplots
@@ -836,134 +860,6 @@ def create_type_curve_match_plotly(well_name, time, delta_p, derivative, fig_num
     
     return fig
 
-def create_schematic_plot_plotly(simulator, data_source="Synthetic"):
-    """Create interactive schematic flow model plot using Plotly"""
-    fig = go.Figure()
-    
-    # Create schematic flow regimes with SMOOTH data
-    t_schematic = np.logspace(-3, 3, 1000)
-    
-    # Generate smooth theoretical responses
-    p_ideal = np.zeros_like(t_schematic)
-    deriv_ideal = np.zeros_like(t_schematic)
-    
-    for i, t in enumerate(t_schematic):
-        if t < 0.01:
-            p, d = simulator.smooth_wellbore_storage_response(t)
-        elif t < 0.1:
-            p, d = simulator.smooth_radial_flow_response(t)
-        elif t < 10:
-            p, d = simulator.smooth_linear_flow_response(t)
-        else:
-            p, d = simulator.smooth_linear_flow_response(t)
-            p *= 1.2  # Late time adjustment
-            d *= 1.2
-        
-        p_ideal[i] = p
-        deriv_ideal[i] = d
-    
-    # Apply smooth dual porosity transition
-    p_ideal, deriv_ideal = simulator.smooth_dual_porosity_transition(t_schematic, p_ideal, deriv_ideal)
-    
-    # Apply cubic spline for ultra-smooth schematic
-    log_t = np.log10(t_schematic)
-    spline_p = CubicSpline(log_t, p_ideal)
-    spline_d = CubicSpline(log_t, deriv_ideal)
-    
-    fine_log_t = np.linspace(log_t[0], log_t[-1], 2000)
-    fine_t = 10**fine_log_t
-    fine_p = spline_p(fine_log_t)
-    fine_d = spline_d(fine_log_t)
-    
-    # Plot smooth schematic
-    fig.add_trace(go.Scatter(
-        x=fine_t,
-        y=fine_p,
-        mode='lines',
-        name=f'{data_source} ΔP (psi)',
-        line=dict(color='blue', width=3),
-        opacity=0.7
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=fine_t,
-        y=fine_d,
-        mode='lines',
-        name=f'{data_source} Derivative (psi)',
-        line=dict(color='red', width=3),
-        opacity=0.7
-    ))
-    
-    # Update layout
-    fig.update_layout(
-        title=dict(
-            text='Figure 5: Schematic Pressure Response of Horizontal Wells<br>in the Pearsall Field Austin Chalk',
-            font=dict(size=18, family="Arial, sans-serif", color='darkblue'),
-            x=0.5,
-            xanchor='center'
-        ),
-        xaxis=dict(
-            title='Elapsed Time, Δt (hours)',
-            type='log',
-            title_font=dict(size=14, family="Arial, sans-serif"),
-            gridcolor='lightgray',
-            gridwidth=1
-        ),
-        yaxis=dict(
-            title='Pressure Change and Derivative (psi)',
-            type='log',
-            title_font=dict(size=14, family="Arial, sans-serif"),
-            gridcolor='lightgray',
-            gridwidth=1
-        ),
-        legend=dict(
-            x=0.02,
-            y=0.98,
-            bgcolor='rgba(255, 255, 255, 0.8)',
-            bordercolor='black',
-            borderwidth=1
-        ),
-        template='plotly_white',
-        hovermode='x unified',
-        height=600,
-        margin=dict(l=50, r=50, t=80, b=50)
-    )
-    
-    # Add annotations for flow regimes
-    annotations = [
-        (0.001, 1, 'Wellbore<br>Storage', 'yellow'),
-        (0.02, 10, 'Radial Flow<br>(if visible)', 'pink'),
-        (0.3, 30, 'Linear Flow', 'lightgreen'),
-        (5, 5, 'Dual Porosity<br>Transition', 'orange'),
-        (50, 80, 'Late Time<br>Linear Flow', 'lightblue')
-    ]
-    
-    for t_pos, p_pos, label, color in annotations:
-        fig.add_annotation(
-            x=t_pos,
-            y=p_pos,
-            text=label,
-            showarrow=False,
-            font=dict(size=10, color='black', family="Arial, sans-serif"),
-            bgcolor=f'rgba({self._color_to_rgb(color)}, 0.7)',
-            bordercolor='black',
-            borderwidth=1,
-            borderpad=4
-        )
-    
-    return fig
-
-def _color_to_rgb(color_name):
-    """Helper function to convert color names to RGB strings"""
-    color_map = {
-        'yellow': '255, 255, 0',
-        'pink': '255, 192, 203',
-        'lightgreen': '144, 238, 144',
-        'orange': '255, 165, 0',
-        'lightblue': '173, 216, 230'
-    }
-    return color_map.get(color_name, '255, 255, 255')
-
 def create_data_summary_table(data, data_source):
     """Create an interactive data summary table"""
     if data is None:
@@ -986,7 +882,7 @@ def create_data_summary_table(data, data_source):
     return pd.DataFrame(summary_data)
 
 # ============================================================================
-# 3. STREAMLIT APP
+# 3. STREAMLIT APP (FIXED VERSION)
 # ============================================================================
 
 def main():
@@ -1049,8 +945,15 @@ def main():
                     
             except Exception as e:
                 st.sidebar.error(f"Error reading file: {str(e)}")
+        elif st.session_state.real_data is not None:
+            # Use previously uploaded data
+            real_data = st.session_state.real_data
     
     # Well selection for synthetic data
+    synthetic_df = None
+    selected_well_name = ""
+    simulator = None
+    
     if st.session_state.data_source in ["Synthetic Only", "Both Synthetic and Real"]:
         st.sidebar.subheader("Synthetic Data Configuration")
         well_options = {
@@ -1085,6 +988,12 @@ def main():
             'well_name': selected_well_name,
             'simulator': simulator
         }
+    elif st.session_state.synthetic_data is not None:
+        # Use previously generated synthetic data
+        synthetic_data = st.session_state.synthetic_data
+        synthetic_df = synthetic_data['df']
+        selected_well_name = synthetic_data['well_name']
+        simulator = synthetic_data['simulator']
     
     # Plot controls
     st.sidebar.subheader("Plot Options")
@@ -1109,7 +1018,7 @@ def main():
             st.info("📊 Using Both Synthetic and Real Data")
     
     with col2:
-        if st.session_state.data_source in ["Synthetic Only", "Both Synthetic and Real"]:
+        if st.session_state.data_source in ["Synthetic Only", "Both Synthetic and Real"] and synthetic_df is not None:
             st.metric("Synthetic Data Points", len(synthetic_df))
     
     with col3:
@@ -1119,13 +1028,13 @@ def main():
     # Data summary table
     st.subheader("📋 Data Summary")
     
-    if st.session_state.data_source == "Synthetic Only" and st.session_state.synthetic_data:
-        summary_df = create_data_summary_table(st.session_state.synthetic_data['df'], "Synthetic")
+    if st.session_state.data_source == "Synthetic Only" and synthetic_df is not None:
+        summary_df = create_data_summary_table(synthetic_df, "Synthetic")
         if summary_df is not None:
             st.dataframe(summary_df, use_container_width=True)
     
-    elif st.session_state.data_source == "Real Data Only" and st.session_state.real_data is not None:
-        summary_df = create_data_summary_table(st.session_state.real_data, "Real")
+    elif st.session_state.data_source == "Real Data Only" and real_data is not None:
+        summary_df = create_data_summary_table(real_data, "Real")
         if summary_df is not None:
             st.dataframe(summary_df, use_container_width=True)
     
@@ -1133,14 +1042,14 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.session_state.synthetic_data:
-                summary_synth = create_data_summary_table(st.session_state.synthetic_data['df'], "Synthetic")
+            if synthetic_df is not None:
+                summary_synth = create_data_summary_table(synthetic_df, "Synthetic")
                 if summary_synth is not None:
                     st.dataframe(summary_synth, use_container_width=True)
         
         with col2:
-            if st.session_state.real_data is not None:
-                summary_real = create_data_summary_table(st.session_state.real_data, "Real")
+            if real_data is not None:
+                summary_real = create_data_summary_table(real_data, "Real")
                 if summary_real is not None:
                     st.dataframe(summary_real, use_container_width=True)
     
@@ -1150,33 +1059,32 @@ def main():
     if show_log_log:
         st.subheader(f"Figure {figure_counter}: Log-Log Diagnostic Plot")
         
-        if st.session_state.data_source == "Synthetic Only" and st.session_state.synthetic_data:
-            synth_data = st.session_state.synthetic_data
+        if st.session_state.data_source == "Synthetic Only" and synthetic_df is not None:
             fig = create_diagnostic_log_log_plot_plotly(
-                synth_data['well_name'], 
-                synth_data['df']['Time'], 
-                synth_data['df']['Delta_P'], 
-                synth_data['df']['Derivative'], 
+                selected_well_name, 
+                synthetic_df['Time'], 
+                synthetic_df['Delta_P'], 
+                synthetic_df['Derivative'], 
                 figure_counter, 
                 "Synthetic"
             )
             st.plotly_chart(fig, use_container_width=True)
         
-        elif st.session_state.data_source == "Real Data Only" and st.session_state.real_data is not None:
-            if 'Delta_P' in st.session_state.real_data.columns:
+        elif st.session_state.data_source == "Real Data Only" and real_data is not None:
+            if 'Delta_P' in real_data.columns:
                 # Calculate derivative if not present
-                if 'Derivative' not in st.session_state.real_data.columns:
+                if 'Derivative' not in real_data.columns:
                     # Simple numerical derivative
-                    st.session_state.real_data['Derivative'] = np.gradient(
-                        st.session_state.real_data['Delta_P'], 
-                        np.log(st.session_state.real_data['Time'])
+                    real_data['Derivative'] = np.gradient(
+                        real_data['Delta_P'].values, 
+                        np.log(real_data['Time'].values)
                     )
                 
                 fig = create_diagnostic_log_log_plot_plotly(
                     "Real Well Data", 
-                    st.session_state.real_data['Time'], 
-                    st.session_state.real_data['Delta_P'], 
-                    st.session_state.real_data['Derivative'], 
+                    real_data['Time'], 
+                    real_data['Delta_P'], 
+                    real_data['Derivative'], 
                     figure_counter, 
                     "Real"
                 )
@@ -1187,31 +1095,30 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.session_state.synthetic_data:
-                    synth_data = st.session_state.synthetic_data
+                if synthetic_df is not None:
                     fig = create_diagnostic_log_log_plot_plotly(
-                        synth_data['well_name'], 
-                        synth_data['df']['Time'], 
-                        synth_data['df']['Delta_P'], 
-                        synth_data['df']['Derivative'], 
+                        selected_well_name, 
+                        synthetic_df['Time'], 
+                        synthetic_df['Delta_P'], 
+                        synthetic_df['Derivative'], 
                         figure_counter, 
                         "Synthetic"
                     )
                     st.plotly_chart(fig, use_container_width=True)
             
             with col2:
-                if st.session_state.real_data is not None and 'Delta_P' in st.session_state.real_data.columns:
-                    if 'Derivative' not in st.session_state.real_data.columns:
-                        st.session_state.real_data['Derivative'] = np.gradient(
-                            st.session_state.real_data['Delta_P'], 
-                            np.log(st.session_state.real_data['Time'])
+                if real_data is not None and 'Delta_P' in real_data.columns:
+                    if 'Derivative' not in real_data.columns:
+                        real_data['Derivative'] = np.gradient(
+                            real_data['Delta_P'].values, 
+                            np.log(real_data['Time'].values)
                         )
                     
                     fig = create_diagnostic_log_log_plot_plotly(
                         "Real Well Data", 
-                        st.session_state.real_data['Time'], 
-                        st.session_state.real_data['Delta_P'], 
-                        st.session_state.real_data['Derivative'], 
+                        real_data['Time'], 
+                        real_data['Delta_P'], 
+                        real_data['Derivative'], 
                         figure_counter, 
                         "Real"
                     )
@@ -1222,23 +1129,22 @@ def main():
     if show_sqrt_time:
         st.subheader(f"Figure {figure_counter}: Square Root of Time Plot")
         
-        if st.session_state.data_source == "Synthetic Only" and st.session_state.synthetic_data:
-            synth_data = st.session_state.synthetic_data
+        if st.session_state.data_source == "Synthetic Only" and synthetic_df is not None:
             fig = create_sqrt_time_plot_plotly(
-                synth_data['well_name'], 
-                synth_data['df']['Time'], 
-                synth_data['df']['Delta_P'], 
+                selected_well_name, 
+                synthetic_df['Time'], 
+                synthetic_df['Delta_P'], 
                 figure_counter, 
                 "Synthetic"
             )
             st.plotly_chart(fig, use_container_width=True)
         
-        elif st.session_state.data_source == "Real Data Only" and st.session_state.real_data is not None:
-            if 'Delta_P' in st.session_state.real_data.columns:
+        elif st.session_state.data_source == "Real Data Only" and real_data is not None:
+            if 'Delta_P' in real_data.columns:
                 fig = create_sqrt_time_plot_plotly(
                     "Real Well Data", 
-                    st.session_state.real_data['Time'], 
-                    st.session_state.real_data['Delta_P'], 
+                    real_data['Time'], 
+                    real_data['Delta_P'], 
                     figure_counter, 
                     "Real"
                 )
@@ -1248,23 +1154,22 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.session_state.synthetic_data:
-                    synth_data = st.session_state.synthetic_data
+                if synthetic_df is not None:
                     fig = create_sqrt_time_plot_plotly(
-                        synth_data['well_name'], 
-                        synth_data['df']['Time'], 
-                        synth_data['df']['Delta_P'], 
+                        selected_well_name, 
+                        synthetic_df['Time'], 
+                        synthetic_df['Delta_P'], 
                         figure_counter, 
                         "Synthetic"
                     )
                     st.plotly_chart(fig, use_container_width=True)
             
             with col2:
-                if st.session_state.real_data is not None and 'Delta_P' in st.session_state.real_data.columns:
+                if real_data is not None and 'Delta_P' in real_data.columns:
                     fig = create_sqrt_time_plot_plotly(
                         "Real Well Data", 
-                        st.session_state.real_data['Time'], 
-                        st.session_state.real_data['Delta_P'], 
+                        real_data['Time'], 
+                        real_data['Delta_P'], 
                         figure_counter, 
                         "Real"
                     )
@@ -1275,36 +1180,33 @@ def main():
     if show_typecurve:
         st.subheader(f"Figure {figure_counter}: Type-Curve Match")
         
-        well_name_to_check = ""
-        if st.session_state.synthetic_data:
-            well_name_to_check = st.session_state.synthetic_data['well_name']
+        well_name_to_check = selected_well_name
         
         if "Damaged" not in well_name_to_check:
-            if st.session_state.data_source == "Synthetic Only" and st.session_state.synthetic_data:
-                synth_data = st.session_state.synthetic_data
+            if st.session_state.data_source == "Synthetic Only" and synthetic_df is not None:
                 fig = create_type_curve_match_plotly(
-                    synth_data['well_name'], 
-                    synth_data['df']['Time'], 
-                    synth_data['df']['Delta_P'], 
-                    synth_data['df']['Derivative'], 
+                    selected_well_name, 
+                    synthetic_df['Time'], 
+                    synthetic_df['Delta_P'], 
+                    synthetic_df['Derivative'], 
                     figure_counter, 
                     "Synthetic"
                 )
                 st.plotly_chart(fig, use_container_width=True)
             
-            elif st.session_state.data_source == "Real Data Only" and st.session_state.real_data is not None:
-                if 'Delta_P' in st.session_state.real_data.columns:
-                    if 'Derivative' not in st.session_state.real_data.columns:
-                        st.session_state.real_data['Derivative'] = np.gradient(
-                            st.session_state.real_data['Delta_P'], 
-                            np.log(st.session_state.real_data['Time'])
+            elif st.session_state.data_source == "Real Data Only" and real_data is not None:
+                if 'Delta_P' in real_data.columns:
+                    if 'Derivative' not in real_data.columns:
+                        real_data['Derivative'] = np.gradient(
+                            real_data['Delta_P'].values, 
+                            np.log(real_data['Time'].values)
                         )
                     
                     fig = create_type_curve_match_plotly(
                         "Real Well Data", 
-                        st.session_state.real_data['Time'], 
-                        st.session_state.real_data['Delta_P'], 
-                        st.session_state.real_data['Derivative'], 
+                        real_data['Time'], 
+                        real_data['Delta_P'], 
+                        real_data['Derivative'], 
                         figure_counter, 
                         "Real"
                     )
@@ -1314,31 +1216,30 @@ def main():
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    if st.session_state.synthetic_data and "Damaged" not in st.session_state.synthetic_data['well_name']:
-                        synth_data = st.session_state.synthetic_data
+                    if synthetic_df is not None and "Damaged" not in selected_well_name:
                         fig = create_type_curve_match_plotly(
-                            synth_data['well_name'], 
-                            synth_data['df']['Time'], 
-                            synth_data['df']['Delta_P'], 
-                            synth_data['df']['Derivative'], 
+                            selected_well_name, 
+                            synthetic_df['Time'], 
+                            synthetic_df['Delta_P'], 
+                            synthetic_df['Derivative'], 
                             figure_counter, 
                             "Synthetic"
                         )
                         st.plotly_chart(fig, use_container_width=True)
                 
                 with col2:
-                    if st.session_state.real_data is not None and 'Delta_P' in st.session_state.real_data.columns:
-                        if 'Derivative' not in st.session_state.real_data.columns:
-                            st.session_state.real_data['Derivative'] = np.gradient(
-                                st.session_state.real_data['Delta_P'], 
-                                np.log(st.session_state.real_data['Time'])
+                    if real_data is not None and 'Delta_P' in real_data.columns:
+                        if 'Derivative' not in real_data.columns:
+                            real_data['Derivative'] = np.gradient(
+                                real_data['Delta_P'].values, 
+                                np.log(real_data['Time'].values)
                             )
                         
                         fig = create_type_curve_match_plotly(
                             "Real Well Data", 
-                            st.session_state.real_data['Time'], 
-                            st.session_state.real_data['Delta_P'], 
-                            st.session_state.real_data['Derivative'], 
+                            real_data['Time'], 
+                            real_data['Delta_P'], 
+                            real_data['Derivative'], 
                             figure_counter, 
                             "Real"
                         )
@@ -1349,30 +1250,29 @@ def main():
     if show_larsen:
         st.subheader(f"Figure {figure_counter}: Larsen Plot")
         
-        if st.session_state.data_source == "Synthetic Only" and st.session_state.synthetic_data:
-            synth_data = st.session_state.synthetic_data
-            if "Well A" in synth_data['well_name'] or "Well D" in synth_data['well_name']:
+        if st.session_state.data_source == "Synthetic Only" and synthetic_df is not None:
+            if "Well A" in selected_well_name or "Well D" in selected_well_name:
                 fig = create_larsen_plot_plotly(
-                    synth_data['well_name'], 
-                    synth_data['df']['Time'], 
-                    synth_data['df']['Derivative'], 
+                    selected_well_name, 
+                    synthetic_df['Time'], 
+                    synthetic_df['Derivative'], 
                     figure_counter, 
                     "Synthetic"
                 )
                 st.plotly_chart(fig, use_container_width=True)
         
-        elif st.session_state.data_source == "Real Data Only" and st.session_state.real_data is not None:
-            if 'Delta_P' in st.session_state.real_data.columns:
-                if 'Derivative' not in st.session_state.real_data.columns:
-                    st.session_state.real_data['Derivative'] = np.gradient(
-                        st.session_state.real_data['Delta_P'], 
-                        np.log(st.session_state.real_data['Time'])
+        elif st.session_state.data_source == "Real Data Only" and real_data is not None:
+            if 'Delta_P' in real_data.columns:
+                if 'Derivative' not in real_data.columns:
+                    real_data['Derivative'] = np.gradient(
+                        real_data['Delta_P'].values, 
+                        np.log(real_data['Time'].values)
                     )
                 
                 fig = create_larsen_plot_plotly(
                     "Real Well Data", 
-                    st.session_state.real_data['Time'], 
-                    st.session_state.real_data['Derivative'], 
+                    real_data['Time'], 
+                    real_data['Derivative'], 
                     figure_counter, 
                     "Real"
                 )
@@ -1382,98 +1282,34 @@ def main():
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.session_state.synthetic_data and ("Well A" in st.session_state.synthetic_data['well_name'] or "Well D" in st.session_state.synthetic_data['well_name']):
-                    synth_data = st.session_state.synthetic_data
+                if synthetic_df is not None and ("Well A" in selected_well_name or "Well D" in selected_well_name):
                     fig = create_larsen_plot_plotly(
-                        synth_data['well_name'], 
-                        synth_data['df']['Time'], 
-                        synth_data['df']['Derivative'], 
+                        selected_well_name, 
+                        synthetic_df['Time'], 
+                        synthetic_df['Derivative'], 
                         figure_counter, 
                         "Synthetic"
                     )
                     st.plotly_chart(fig, use_container_width=True)
             
             with col2:
-                if st.session_state.real_data is not None and 'Delta_P' in st.session_state.real_data.columns:
-                    if 'Derivative' not in st.session_state.real_data.columns:
-                        st.session_state.real_data['Derivative'] = np.gradient(
-                            st.session_state.real_data['Delta_P'], 
-                            np.log(st.session_state.real_data['Time'])
+                if real_data is not None and 'Delta_P' in real_data.columns:
+                    if 'Derivative' not in real_data.columns:
+                        real_data['Derivative'] = np.gradient(
+                            real_data['Delta_P'].values, 
+                            np.log(real_data['Time'].values)
                         )
                     
                     fig = create_larsen_plot_plotly(
                         "Real Well Data", 
-                        st.session_state.real_data['Time'], 
-                        st.session_state.real_data['Derivative'], 
+                        real_data['Time'], 
+                        real_data['Derivative'], 
                         figure_counter, 
                         "Real"
                     )
                     st.plotly_chart(fig, use_container_width=True)
         
         figure_counter += 1
-    
-    if show_schematic and st.session_state.data_source in ["Synthetic Only", "Both Synthetic and Real"]:
-        st.subheader("Schematic Flow Model (Figure 5)")
-        
-        if st.session_state.synthetic_data:
-            simulator = st.session_state.synthetic_data['simulator']
-            data_source = "Synthetic" if st.session_state.data_source == "Synthetic Only" else "Synthetic (for comparison)"
-            
-            # Note: The create_schematic_plot_plotly function needs to be fixed for color conversion
-            # For now, let's create a simpler version
-            fig = go.Figure()
-            
-            # Generate schematic data
-            t_schematic = np.logspace(-3, 3, 1000)
-            p_ideal = np.zeros_like(t_schematic)
-            deriv_ideal = np.zeros_like(t_schematic)
-            
-            for i, t in enumerate(t_schematic):
-                if t < 0.01:
-                    p, d = simulator.smooth_wellbore_storage_response(t)
-                elif t < 0.1:
-                    p, d = simulator.smooth_radial_flow_response(t)
-                elif t < 10:
-                    p, d = simulator.smooth_linear_flow_response(t)
-                else:
-                    p, d = simulator.smooth_linear_flow_response(t)
-                    p *= 1.2
-                    d *= 1.2
-                
-                p_ideal[i] = p
-                deriv_ideal[i] = d
-            
-            # Apply smooth dual porosity transition
-            p_ideal, deriv_ideal = simulator.smooth_dual_porosity_transition(t_schematic, p_ideal, deriv_ideal)
-            
-            # Plot
-            fig.add_trace(go.Scatter(
-                x=t_schematic,
-                y=p_ideal,
-                mode='lines',
-                name=f'{data_source} ΔP (psi)',
-                line=dict(color='blue', width=3),
-                opacity=0.7
-            ))
-            
-            fig.add_trace(go.Scatter(
-                x=t_schematic,
-                y=deriv_ideal,
-                mode='lines',
-                name=f'{data_source} Derivative (psi)',
-                line=dict(color='red', width=3),
-                opacity=0.7
-            ))
-            
-            fig.update_layout(
-                title='Figure 5: Schematic Pressure Response of Horizontal Wells<br>in the Pearsall Field Austin Chalk',
-                xaxis=dict(title='Elapsed Time, Δt (hours)', type='log'),
-                yaxis=dict(title='Pressure Change and Derivative (psi)', type='log'),
-                template='plotly_white',
-                height=600
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
     
     # Results summary table
     st.subheader("📊 Summary of Results (Simulating Table 3 from Paper)")
@@ -1495,19 +1331,18 @@ def main():
     # Data download section
     st.subheader("📥 Data Download")
     
-    if st.session_state.data_source == "Synthetic Only" and st.session_state.synthetic_data:
-        synth_data = st.session_state.synthetic_data
-        csv_synthetic = synth_data['df'].to_csv(index=False)
+    if st.session_state.data_source == "Synthetic Only" and synthetic_df is not None:
+        csv_synthetic = synthetic_df.to_csv(index=False)
         
         st.download_button(
             label="Download Synthetic Data (CSV)",
             data=csv_synthetic,
-            file_name=f"synthetic_{synth_data['well_name'].replace(' ', '_')}_pressure_data.csv",
+            file_name=f"synthetic_{selected_well_name.replace(' ', '_')}_pressure_data.csv",
             mime="text/csv"
         )
     
-    elif st.session_state.data_source == "Real Data Only" and st.session_state.real_data is not None:
-        csv_real = st.session_state.real_data.to_csv(index=False)
+    elif st.session_state.data_source == "Real Data Only" and real_data is not None:
+        csv_real = real_data.to_csv(index=False)
         
         st.download_button(
             label="Download Real Data (CSV)",
@@ -1520,20 +1355,19 @@ def main():
         col1, col2 = st.columns(2)
         
         with col1:
-            if st.session_state.synthetic_data:
-                synth_data = st.session_state.synthetic_data
-                csv_synthetic = synth_data['df'].to_csv(index=False)
+            if synthetic_df is not None:
+                csv_synthetic = synthetic_df.to_csv(index=False)
                 
                 st.download_button(
                     label="Download Synthetic Data (CSV)",
                     data=csv_synthetic,
-                    file_name=f"synthetic_{synth_data['well_name'].replace(' ', '_')}_pressure_data.csv",
+                    file_name=f"synthetic_{selected_well_name.replace(' ', '_')}_pressure_data.csv",
                     mime="text/csv"
                 )
         
         with col2:
-            if st.session_state.real_data is not None:
-                csv_real = st.session_state.real_data.to_csv(index=False)
+            if real_data is not None:
+                csv_real = real_data.to_csv(index=False)
                 
                 st.download_button(
                     label="Download Real Data (CSV)",
